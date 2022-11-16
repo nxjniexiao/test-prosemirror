@@ -4,49 +4,17 @@ import { StepMap } from 'prosemirror-transform';
 import { EditorState, TextSelection, Transaction } from 'prosemirror-state';
 import { keymap } from 'prosemirror-keymap';
 import { undo, redo } from 'prosemirror-history';
-import {
-  chainCommands,
-  deleteSelection,
-  newlineInCode,
-} from 'prosemirror-commands';
+import { chainCommands, deleteSelection } from 'prosemirror-commands';
 import { GetPos, isMacOS } from './types';
 
-import 'katex/dist/katex.css';
-import './math.css';
+import './heading.css';
 
-export async function renderMath(
-  math: string,
-  element: HTMLElement,
-  inline: boolean
-) {
-  // TODO: Change this to a Text call that includes the document, allows inclusion of displays! :)
-  // const txt = toText(this.node, this.outerView.state.schema, document);
-  // console.log({ math, txt });
-  // const render = math.replace(/−/g, '-');
-  const render = math?.trim() || '...';
-  try {
-    const katex = await import('katex');
-    katex.default.render(render, element, {
-      displayMode: !inline,
-      throwOnError: false,
-      macros: {
-        '\\boldsymbol': '\\mathbf',
-      },
-    });
-  } catch (error) {
-    // eslint-disable-next-line no-param-reassign
-    element.innerText = error as string;
-  }
-}
-
-export class MathView implements NodeView {
+export class CustomHeadingView implements NodeView {
   dom: HTMLElement;
 
-  mathEditor: HTMLElement;
+  headingEditor: HTMLElement;
 
-  mathContent: HTMLElement;
-
-  inline: boolean;
+  headingContent: HTMLElement;
 
   // These are used when the footnote is selected
   innerView: EditorView;
@@ -57,32 +25,24 @@ export class MathView implements NodeView {
 
   getPos: GetPos;
 
-  constructor(node: Node, view: EditorView, getPos: GetPos, inline: boolean) {
+  constructor(node: Node, view: EditorView, getPos: GetPos) {
     this.node = node;
     this.outerView = view;
     this.getPos = getPos;
-    this.dom = document.createElement(inline ? 'span' : 'div');
-    this.dom.classList.add('math');
-
-    this.mathEditor = document.createElement(inline ? 'span' : 'div');
-    this.mathEditor.classList.add('math-editor');
-    this.mathContent = document.createElement(inline ? 'span' : 'div');
-    this.mathContent.classList.add('math-content');
-    this.mathContent.addEventListener('click', () => this.selectNode());
-    this.dom.appendChild(this.mathEditor);
-    this.dom.appendChild(this.mathContent);
-    this.inline = inline;
-
-    if (this.inline) {
-      this.dom.classList.add('inline');
-      this.mathEditor.classList.add('inline');
-    } else {
-      this.dom.classList.add('display');
-    }
+    const level = node.attrs.level;
+    this.dom = document.createElement('div');
+    this.headingEditor = document.createElement(`h${level}`);
+    this.headingEditor.classList.add('heading-editor');
+    this.headingContent = document.createElement(`h${level}`);
+    this.headingContent.classList.add('heading-content');
+    this.headingContent.addEventListener('click', () => this.selectNode());
+    this.dom.appendChild(this.headingEditor);
+    this.dom.appendChild(this.headingContent);
 
     this.addFakeCursor();
+    this.dom.classList.add('heading');
     this.dom.classList.remove('editing');
-    this.renderMath();
+    this.renderHeading();
 
     const unFocus = () => {
       this.dom.classList.remove('editing');
@@ -93,7 +53,7 @@ export class MathView implements NodeView {
     const mac = isMacOS();
 
     this.innerView = new EditorView(
-      { mount: this.mathEditor },
+      { mount: this.headingEditor },
       {
         state: EditorState.create({
           doc: this.node,
@@ -144,6 +104,9 @@ export class MathView implements NodeView {
 
         dispatchTransaction: this.dispatchInner.bind(this),
         handleDOMEvents: {
+          blur: () => {
+            this.deselectNode();
+          },
           mousedown: () => {
             // Kludge to prevent issues due to the fact that the whole
             // footnote is node-selected (and thus DOM-selected) when
@@ -178,7 +141,7 @@ export class MathView implements NodeView {
         );
       }
     }
-    this.renderMath();
+    this.renderHeading();
     return true;
   }
 
@@ -200,8 +163,8 @@ export class MathView implements NodeView {
     }
   }
 
-  renderMath() {
-    renderMath(this.node.textContent, this.mathContent, this.inline);
+  renderHeading() {
+    this.headingContent.innerHTML = this.node.textContent;
   }
 
   destroy() {
@@ -220,9 +183,8 @@ export class MathView implements NodeView {
   }
 
   addFakeCursor() {
-    if (!this.inline) return;
     const hasContent = this.node.textContent.length > 0;
-    this.mathEditor.classList[hasContent ? 'remove' : 'add']('empty');
+    this.headingEditor.classList[hasContent ? 'remove' : 'add']('empty');
   }
 
   selectNode() {
@@ -236,8 +198,4 @@ export class MathView implements NodeView {
     this.dom.classList.remove('ProseMirror-selectedNode');
     this.dom.classList.remove('editing');
   }
-}
-
-export function InlineMathView(node: Node, view: EditorView, getPos: GetPos) {
-  return new MathView(node, view, getPos, true);
 }

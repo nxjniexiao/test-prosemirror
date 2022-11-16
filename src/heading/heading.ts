@@ -1,4 +1,11 @@
-import { mergeAttributes, Node, textblockTypeInputRule } from '@tiptap/core';
+import {
+  mergeAttributes,
+  Node,
+  NodeViewRendererProps,
+  textblockTypeInputRule,
+} from '@tiptap/core';
+import { CustomHeadingView } from './heading-view';
+import { GetPos } from './types';
 
 export type Level = 1 | 2 | 3 | 4 | 5 | 6;
 
@@ -111,5 +118,15 @@ export const Heading = Node.create<HeadingOptions>({
         },
       });
     });
+  },
+
+  addNodeView() {
+    return (props: NodeViewRendererProps) => {
+      return new CustomHeadingView(
+        props.node,
+        props.editor.view,
+        props.getPos as GetPos
+      );
+    };
   },
 });
