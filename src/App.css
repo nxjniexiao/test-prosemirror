@@ -1,0 +1,8 @@
+[contenteditable] {
+  outline: 0px solid transparent;
+}
+
+/* Basic editor styles */
+.ProseMirror {
+  margin-top: 0.75em;
+}
