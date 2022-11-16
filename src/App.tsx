@@ -4,6 +4,7 @@ import { Extension } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import { InlineMath } from './math';
 import './App.css';
+import { Heading } from './heading/heading';
 
 const App = () => {
   const [json, setJson] = useState(null);
@@ -50,8 +51,9 @@ const App = () => {
           };
         },
       }),
-      StarterKit,
+      StarterKit.configure({ heading: false }),
       InlineMath,
+      Heading,
     ],
     onSelectionUpdate: (prop) => {
       console.log('========> onSelectionUpdate: ', prop);
