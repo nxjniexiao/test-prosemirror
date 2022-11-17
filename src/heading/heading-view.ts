@@ -1,4 +1,4 @@
-import { Node } from 'prosemirror-model';
+import { Fragment, Node, Slice } from 'prosemirror-model';
 import { EditorView, NodeView } from 'prosemirror-view';
 import { StepMap } from 'prosemirror-transform';
 import { EditorState, TextSelection, Transaction } from 'prosemirror-state';
@@ -52,11 +52,13 @@ export class CustomHeadingView implements NodeView {
 
     const mac = isMacOS();
 
+    const doc = this.insertHashToNode();
+
     this.innerView = new EditorView(
       { mount: this.headingEditor },
       {
         state: EditorState.create({
-          doc: this.node,
+          doc,
           plugins: [
             keymap({
               'Mod-a': () => {
@@ -103,6 +105,10 @@ export class CustomHeadingView implements NodeView {
         }),
 
         dispatchTransaction: this.dispatchInner.bind(this),
+        handleClick(view, pos, event) {
+          console.log(`click on: ${pos}`);
+          console.log(view.state.doc.resolve(pos));
+        },
         handleDOMEvents: {
           blur: () => {
             this.deselectNode();
@@ -125,7 +131,8 @@ export class CustomHeadingView implements NodeView {
     this.addFakeCursor();
     if (this.innerView) {
       const { state } = this.innerView;
-      const start = node.content.findDiffStart(state.doc.content);
+      const fixedNode = this.removeHashFromNode();
+      const start = node.content.findDiffStart(fixedNode.content);
       if (start != null) {
         const ends = node.content.findDiffEnd(state.doc.content as any);
         let { a: endA, b: endB } = ends ?? { a: 0, b: 0 };
@@ -151,7 +158,7 @@ export class CustomHeadingView implements NodeView {
 
     if (!tr.getMeta('fromOutside')) {
       const outerTr = this.outerView.state.tr;
-      const offsetMap = StepMap.offset(this.getPos() + 1);
+      const offsetMap = StepMap.offset(this.getPos() - 1);
       for (let i = 0; i < transactions.length; i += 1) {
         const { steps } = transactions[i];
         for (let j = 0; j < steps.length; j += 1)
@@ -197,5 +204,15 @@ export class CustomHeadingView implements NodeView {
   deselectNode() {
     this.dom.classList.remove('ProseMirror-selectedNode');
     this.dom.classList.remove('editing');
+  }
+
+  insertHashToNode() {
+    const hashNode = this.outerView.state.schema.text('# ');
+    const slice = new Slice(Fragment.fromArray([hashNode]), 0, 0);
+    return this.node.replace(0, 0, slice);
+  }
+
+  removeHashFromNode() {
+    return this.innerView.state.doc.replace(0, 2, Slice.empty);
   }
 }
