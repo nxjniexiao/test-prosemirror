@@ -157,8 +157,17 @@ export class CustomHeadingView implements NodeView {
     this.innerView.updateState(state);
 
     if (!tr.getMeta('fromOutside')) {
+      // check if the text content match the heading level
+      // "# heading" match level 1
+      // "###### heading" match level 6
+      const textContent = state.doc.textContent;
+      if (!this.isValidTextContent(textContent)) {
+        this.handleInvalidText(textContent);
+        return;
+      }
       const outerTr = this.outerView.state.tr;
-      const offsetMap = StepMap.offset(this.getPos() - 1);
+      const level = this.node.attrs.level;
+      const offsetMap = StepMap.offset(this.getPos() - level);
       for (let i = 0; i < transactions.length; i += 1) {
         const { steps } = transactions[i];
         for (let j = 0; j < steps.length; j += 1)
@@ -207,12 +216,58 @@ export class CustomHeadingView implements NodeView {
   }
 
   insertHashToNode() {
-    const hashNode = this.outerView.state.schema.text('# ');
+    let text = ' ';
+    let level = this.node.attrs.level;
+    for (let i = 0; i < level; i++) {
+      text = '#' + text;
+    }
+    const hashNode = this.outerView.state.schema.text(text);
     const slice = new Slice(Fragment.fromArray([hashNode]), 0, 0);
     return this.node.replace(0, 0, slice);
   }
 
   removeHashFromNode() {
-    return this.innerView.state.doc.replace(0, 2, Slice.empty);
+    const level = this.node.attrs.level;
+    return this.innerView.state.doc.replace(0, level + 1, Slice.empty);
+  }
+
+  isValidTextContent(textContent: string) {
+    const reg = /^(#+)\s/;
+    const match = reg.exec(textContent);
+    return match?.[1].length === this.node.attrs.level;
+  }
+
+  handleInvalidText(textContent: string) {
+    const reg = /^(#+)\s/;
+    const match = reg.exec(textContent);
+    const outerTr = this.outerView.state.tr;
+    const start = this.getPos();
+    const end = start + this.node.nodeSize + 1;
+    if (match) {
+      // convert to h1-h6
+      const matchedLevel = match[1].length;
+      const level = Math.min(6, matchedLevel);
+      let node = this.innerView.state.doc.replace(
+        0,
+        matchedLevel + 1,
+        Slice.empty
+      );
+      node = this.node.type.create({ level }, node.content);
+      outerTr.replaceWith(start, end, node);
+      if (outerTr.docChanged) {
+        this.outerView.dispatch(outerTr);
+      }
+    } else {
+      // convert to paragraph
+      const node = this.outerView.state.schema.node(
+        'paragraph',
+        null,
+        this.innerView.state.doc.content
+      );
+      outerTr.replaceWith(start, end, node);
+      if (outerTr.docChanged) {
+        this.outerView.dispatch(outerTr);
+      }
+    }
   }
 }
