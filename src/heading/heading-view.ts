@@ -1,6 +1,5 @@
 import { Fragment, Node, Slice } from 'prosemirror-model';
 import { EditorView, NodeView } from 'prosemirror-view';
-import { StepMap } from 'prosemirror-transform';
 import { EditorState, TextSelection, Transaction } from 'prosemirror-state';
 import { keymap } from 'prosemirror-keymap';
 import { undo, redo } from 'prosemirror-history';
@@ -8,6 +7,8 @@ import { chainCommands, deleteSelection } from 'prosemirror-commands';
 import { GetPos, isMacOS } from './types';
 
 import './heading.css';
+
+const HEADING_EXP = /^(#+)\s/;
 
 export class CustomHeadingView implements NodeView {
   dom: HTMLElement;
@@ -25,15 +26,17 @@ export class CustomHeadingView implements NodeView {
 
   getPos: GetPos;
 
+  editing: boolean;
+
   constructor(node: Node, view: EditorView, getPos: GetPos) {
     this.node = node;
     this.outerView = view;
     this.getPos = getPos;
     const level = node.attrs.level;
-    this.dom = document.createElement('div');
-    this.headingEditor = document.createElement(`h${level}`);
+    this.dom = document.createElement(`h${level}`);
+    this.headingEditor = document.createElement(`span`);
     this.headingEditor.classList.add('heading-editor');
-    this.headingContent = document.createElement(`h${level}`);
+    this.headingContent = document.createElement(`span`);
     this.headingContent.classList.add('heading-content');
     this.headingContent.addEventListener('click', () => this.selectNode());
     this.dom.appendChild(this.headingEditor);
@@ -112,6 +115,8 @@ export class CustomHeadingView implements NodeView {
         handleDOMEvents: {
           blur: () => {
             this.deselectNode();
+            // 处理 h1-h6/p 之间的转换
+            this.dispatchTypeChangeIfPossible();
           },
           mousedown: () => {
             // Kludge to prevent issues due to the fact that the whole
@@ -125,13 +130,16 @@ export class CustomHeadingView implements NodeView {
     );
   }
 
+  // true: 需要被更新; false: 不需要被更新
   update(node: Node) {
-    if (!node.sameMarkup(this.node)) return false;
+    if (!this.editing && !node.sameMarkup(this.node)) return false;
     this.node = node;
     this.addFakeCursor();
     if (this.innerView) {
       const { state } = this.innerView;
-      const fixedNode = this.removeHashFromNode();
+      let fixedNode = node;
+      let level = this.getLevelFromContent(fixedNode.textContent);
+      if (level) fixedNode = node.replace(0, level + 1, Slice.empty);
       const start = node.content.findDiffStart(fixedNode.content);
       if (start != null) {
         const ends = node.content.findDiffEnd(state.doc.content as any);
@@ -153,28 +161,40 @@ export class CustomHeadingView implements NodeView {
   }
 
   dispatchInner(tr: Transaction) {
+    const prevState = this.innerView.state;
     const { state, transactions } = this.innerView.state.applyTransaction(tr);
     this.innerView.updateState(state);
 
     if (!tr.getMeta('fromOutside')) {
-      // check if the text content match the heading level
-      // "# heading" match level 1
-      // "###### heading" match level 6
-      const textContent = state.doc.textContent;
-      if (!this.isValidTextContent(textContent)) {
-        this.handleInvalidText(textContent);
-        return;
-      }
+      // 根据内部编辑器 node 和外部编辑中 node 的差异生成 transaction
       const outerTr = this.outerView.state.tr;
-      const level = this.node.attrs.level;
-      const offsetMap = StepMap.offset(this.getPos() - level);
-      for (let i = 0; i < transactions.length; i += 1) {
-        const { steps } = transactions[i];
-        for (let j = 0; j < steps.length; j += 1)
-          outerTr.step(steps[j].map(offsetMap) as any);
+      let innerNode = state.doc;
+      const prevLevel = this.getLevelFromContent(prevState.doc.textContent);
+      const level = this.getLevelFromContent(state.doc.textContent);
+      // 移除内部编辑中 node 的 # 前缀
+      if (level != null) {
+        innerNode = this.innerView.state.doc.replace(0, level + 1, Slice.empty);
+      }
+      // 计算内部和外部 node 不同的位置
+      const start = this.node.content.findDiffStart(innerNode.content);
+      if (start != null) {
+        const ends = this.node.content.findDiffEnd(innerNode.content);
+        let { a: endA, b: endB } = ends ?? { a: 0, b: 0 };
+        const overlap = start - Math.min(endA, endB);
+        // 重叠部分，如： string => strString
+        if (overlap > 0) {
+          endA += overlap;
+          endB += overlap;
+        }
+        const pos = this.getPos() + 1;
+        outerTr.replace(pos + start, pos + endA, innerNode.slice(start, endB));
       }
       if (outerTr.docChanged) {
         this.outerView.dispatch(outerTr);
+      }
+      if (level !== prevLevel) {
+        this.dom.classList.remove(`level-${prevLevel || 'paragraph'}`);
+        this.dom.classList.add(`level-${level || 'paragraph'}`);
       }
     }
   }
@@ -204,6 +224,7 @@ export class CustomHeadingView implements NodeView {
   }
 
   selectNode() {
+    this.editing = true;
     this.dom.classList.add('ProseMirror-selectedNode');
     this.dom.classList.add('editing');
     // This is necessary on first insert.
@@ -211,6 +232,7 @@ export class CustomHeadingView implements NodeView {
   }
 
   deselectNode() {
+    this.editing = false;
     this.dom.classList.remove('ProseMirror-selectedNode');
     this.dom.classList.remove('editing');
   }
@@ -226,48 +248,34 @@ export class CustomHeadingView implements NodeView {
     return this.node.replace(0, 0, slice);
   }
 
-  removeHashFromNode() {
-    const level = this.node.attrs.level;
-    return this.innerView.state.doc.replace(0, level + 1, Slice.empty);
+  getLevelFromInnerViewContent() {
+    const textContent = this.innerView.state.doc.textContent;
+    return this.getLevelFromContent(textContent);
   }
 
-  isValidTextContent(textContent: string) {
-    const reg = /^(#+)\s/;
-    const match = reg.exec(textContent);
-    return match?.[1].length === this.node.attrs.level;
-  }
-
-  handleInvalidText(textContent: string) {
-    const reg = /^(#+)\s/;
-    const match = reg.exec(textContent);
-    const outerTr = this.outerView.state.tr;
-    const start = this.getPos();
-    const end = start + this.node.nodeSize + 1;
+  getLevelFromContent(text: string) {
+    const match = HEADING_EXP.exec(text);
     if (match) {
-      // convert to h1-h6
       const matchedLevel = match[1].length;
       const level = Math.min(6, matchedLevel);
-      let node = this.innerView.state.doc.replace(
-        0,
-        matchedLevel + 1,
-        Slice.empty
-      );
-      node = this.node.type.create({ level }, node.content);
-      outerTr.replaceWith(start, end, node);
-      if (outerTr.docChanged) {
-        this.outerView.dispatch(outerTr);
-      }
-    } else {
-      // convert to paragraph
-      const node = this.outerView.state.schema.node(
-        'paragraph',
-        null,
-        this.innerView.state.doc.content
-      );
-      outerTr.replaceWith(start, end, node);
-      if (outerTr.docChanged) {
-        this.outerView.dispatch(outerTr);
-      }
+      return level;
     }
+  }
+
+  dispatchTypeChangeIfPossible() {
+    const level = this.getLevelFromInnerViewContent();
+    if (level === this.node.attrs.level) return;
+    const tr = this.outerView.state.tr;
+    if (level == null) {
+      // 转换成段落
+      tr.setNodeMarkup(
+        this.getPos(),
+        this.outerView.state.schema.nodes.paragraph
+      );
+    } else if (level !== this.node.attrs.level) {
+      // h1-h6 之间转换
+      tr.setNodeAttribute(this.getPos(), 'level', level);
+    }
+    this.outerView.dispatch(tr);
   }
 }
