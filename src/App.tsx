@@ -13,9 +13,18 @@ const App = () => {
       type: 'doc',
       content: [
         {
+          type: 'paragraph',
+          content: [
+            {
+              type: 'text',
+              text: '12',
+            },
+          ],
+        },
+        {
           type: 'heading',
           attrs: {
-            level: 1,
+            level: 2,
           },
           content: [
             {
@@ -68,10 +77,10 @@ const App = () => {
       Heading,
     ],
     onSelectionUpdate: (prop) => {
-      console.log('========> onSelectionUpdate: ', prop);
+      // console.log('========> onSelectionUpdate: ', prop);
     },
     onTransaction: (prop) => {
-      console.log('========> onTransaction: ', prop);
+      // console.log('========> onTransaction: ', prop);
     },
   });
 
@@ -156,4 +165,7 @@ const App = () => {
   );
 };
 
+const App2 = () => {
+  return <div>App</div>
+}
 export default App;

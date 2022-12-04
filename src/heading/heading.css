@@ -1,13 +1,4 @@
-.heading-content {
-  overflow: hidden;
-}
-.heading.editing .heading-content {
-  display: none;
-}
 .heading .heading-editor {
-  display: none;
-}
-.heading.editing .heading-editor {
   display: block;
 }
 

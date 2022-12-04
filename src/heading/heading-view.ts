@@ -15,8 +15,6 @@ export class CustomHeadingView implements NodeView {
 
   headingEditor: HTMLElement;
 
-  headingContent: HTMLElement;
-
   // These are used when the footnote is selected
   innerView: EditorView;
 
@@ -28,6 +26,9 @@ export class CustomHeadingView implements NodeView {
 
   editing: boolean;
 
+  // focus 内部编辑器时光标的修正值
+  cursorOffset: number;
+
   constructor(node: Node, view: EditorView, getPos: GetPos) {
     this.node = node;
     this.outerView = view;
@@ -36,16 +37,11 @@ export class CustomHeadingView implements NodeView {
     this.dom = document.createElement(`h${level}`);
     this.headingEditor = document.createElement(`span`);
     this.headingEditor.classList.add('heading-editor');
-    this.headingContent = document.createElement(`span`);
-    this.headingContent.classList.add('heading-content');
-    this.headingContent.addEventListener('click', () => this.selectNode());
     this.dom.appendChild(this.headingEditor);
-    this.dom.appendChild(this.headingContent);
 
     this.addFakeCursor();
     this.dom.classList.add('heading');
     this.dom.classList.remove('editing');
-    this.renderHeading();
 
     const unFocus = () => {
       this.dom.classList.remove('editing');
@@ -55,7 +51,7 @@ export class CustomHeadingView implements NodeView {
 
     const mac = isMacOS();
 
-    const doc = this.insertHashToNode();
+    const doc = this.node;
 
     this.innerView = new EditorView(
       { mount: this.headingEditor },
@@ -108,23 +104,47 @@ export class CustomHeadingView implements NodeView {
         }),
 
         dispatchTransaction: this.dispatchInner.bind(this),
-        handleClick(view, pos, event) {
+        handleClick: (view, pos, event) => {
           console.log(`click on: ${pos}`);
           console.log(view.state.doc.resolve(pos));
+          if (this.cursorOffset) {
+            let tr = view.state.tr;
+            let newSelection;
+            try {
+              const anchor = view.state.doc.resolve(pos + this.cursorOffset);
+              newSelection = TextSelection.near(anchor, -1);
+            } catch (err) {
+              newSelection = TextSelection.atEnd(view.state.doc);
+            }
+            tr = tr.setSelection(newSelection);
+            this.cursorOffset = 0;
+            view.dispatch(tr);
+          }
         },
         handleDOMEvents: {
+          click: (view, event) => {
+            console.log('================== click', view, event);
+          },
+          focus: (view, event) => {
+            console.log('================== focus', view, event);
+            this.selectNode();
+            // 内部编辑器中插入 #
+            this.insertHash();
+          },
           blur: () => {
             this.deselectNode();
             // 处理 h1-h6/p 之间的转换
             this.dispatchTypeChangeIfPossible();
+            // 移除内部编辑器中的 #
+            this.removeHash();
           },
-          mousedown: () => {
-            // Kludge to prevent issues due to the fact that the whole
-            // footnote is node-selected (and thus DOM-selected) when
-            // the parent editor is focused.
-            if (this.outerView.hasFocus()) this.innerView.focus();
-            return false;
-          },
+          // mousedown: () => {
+          //   // Kludge to prevent issues due to the fact that the whole
+          //   // footnote is node-selected (and thus DOM-selected) when
+          //   // the parent editor is focused.
+          //   if (this.outerView.hasFocus()) this.innerView.focus();
+          //   return false;
+          // },
         },
       }
     );
@@ -156,7 +176,6 @@ export class CustomHeadingView implements NodeView {
         );
       }
     }
-    this.renderHeading();
     return true;
   }
 
@@ -199,10 +218,6 @@ export class CustomHeadingView implements NodeView {
     }
   }
 
-  renderHeading() {
-    this.headingContent.innerHTML = this.node.textContent;
-  }
-
   destroy() {
     this.innerView.destroy();
     this.dom.textContent = '';
@@ -228,37 +243,51 @@ export class CustomHeadingView implements NodeView {
     this.dom.classList.add('ProseMirror-selectedNode');
     this.dom.classList.add('editing');
     // This is necessary on first insert.
-    setTimeout(() => this.innerView.focus(), 1);
+    // setTimeout(() => this.innerView.focus(), 1);
   }
 
   deselectNode() {
     this.editing = false;
     this.dom.classList.remove('ProseMirror-selectedNode');
     this.dom.classList.remove('editing');
+    const className = this.dom.className;
+    const match = /(level-(?:h[1-6]|paragraph))/.exec(className);
+    if (match?.[1]) this.dom.classList.remove(match[1]);
   }
 
-  insertHashToNode() {
+  insertHash() {
     let text = ' ';
     let level = this.node.attrs.level;
+    this.cursorOffset = level + 1;
     for (let i = 0; i < level; i++) {
       text = '#' + text;
     }
-    const hashNode = this.outerView.state.schema.text(text);
-    const slice = new Slice(Fragment.fromArray([hashNode]), 0, 0);
-    return this.node.replace(0, 0, slice);
+    let tr = this.innerView.state.tr;
+    tr = tr.insertText(text, 0, 0);
+    this.innerView.dispatch(tr);
   }
 
-  getLevelFromInnerViewContent() {
+  removeHash() {
+    const level = this.getLevelFromInnerViewContent(true);
+    if (level) {
+      let tr = this.innerView.state.tr;
+      tr = tr.replace(0, level + 1, Slice.empty);
+      tr = tr.setMeta('fromOutside', true);
+      this.innerView.dispatch(tr);
+    }
+  }
+
+  getLevelFromInnerViewContent(withoutFix?: boolean) {
     const textContent = this.innerView.state.doc.textContent;
-    return this.getLevelFromContent(textContent);
+    return this.getLevelFromContent(textContent, withoutFix);
   }
 
-  getLevelFromContent(text: string) {
+  getLevelFromContent(text: string, withoutFix?: boolean) {
     const match = HEADING_EXP.exec(text);
     if (match) {
       const matchedLevel = match[1].length;
-      const level = Math.min(6, matchedLevel);
-      return level;
+      if (withoutFix) return matchedLevel;
+      return Math.min(6, matchedLevel);
     }
   }
 

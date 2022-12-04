@@ -4,6 +4,7 @@ import {
   NodeViewRendererProps,
   textblockTypeInputRule,
 } from '@tiptap/core';
+import { createVirtualCursor } from '../virtual-cursor';
 import { CustomHeadingView } from './heading-view';
 import { GetPos } from './types';
 
@@ -129,4 +130,8 @@ export const Heading = Node.create<HeadingOptions>({
       );
     };
   },
+
+  // addProseMirrorPlugins() {
+  //   return [createVirtualCursor()]
+  // }
 });
